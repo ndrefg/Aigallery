@@ -45,6 +45,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -164,6 +165,7 @@ fun ChatPanel(
   val longPressedMessage: MutableState<ChatMessage?> = remember { mutableStateOf(null) }
 
   var showErrorDialog by remember { mutableStateOf(false) }
+  var showEditChatMessageDialog by remember { mutableStateOf(false) }
 
   // Keep track of the last message and last message content.
   val lastMessage: MutableState<ChatMessage?> = remember { mutableStateOf(null) }
@@ -386,6 +388,14 @@ fun ChatPanel(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                   ) {
                     LatencyText(message = message)
+                     if (message is ChatMessageText && message.isEdited) {
+                       Text(
+                         text = stringResource(R.string.edited_indicator),
+                         style = MaterialTheme.typography.labelSmall,
+                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                         modifier = Modifier.padding(start = 4.dp)
+                       )
+                     }
                     // A button to show stats for the LLM message.
                     if (
                       task.type.id.startsWith("llm_") &&
@@ -631,15 +641,54 @@ fun ChatPanel(
             ) {
               Icon(
                 Icons.Rounded.ContentCopy,
-                contentDescription = "",
+                  contentDescription = stringResource(R.string.copy_text_description),
                 modifier = Modifier.size(18.dp),
               )
-              Text("Copy text")
+                Text(stringResource(R.string.copy_text_label))
+              }
+            }
+
+            // Edit message (for AGENT and USER text messages)
+            if (message is ChatMessageText && (message.side == ChatSide.AGENT || message.side == ChatSide.USER)) {
+              Box(
+                modifier =
+                Modifier.fillMaxWidth().clickable {
+                  showMessageLongPressedSheet = false
+                  showEditChatMessageDialog = true // Will trigger the dialog
+                }
+              ) {
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(6.dp),
+                  modifier = Modifier.padding(vertical = 8.dp, horizontal = 16.dp),
+                ) {
+                  Icon(
+                    Icons.Rounded.Edit, // Assuming Icons.Rounded.Edit exists
+                    contentDescription = stringResource(R.string.edit_message_description),
+                    modifier = Modifier.size(18.dp),
+                  )
+                  Text(stringResource(R.string.edit_message_label))
+                }
             }
           }
         }
       }
     }
+  }
+
+  if (showEditChatMessageDialog && longPressedMessage.value is ChatMessageText) {
+    val messageToEdit = longPressedMessage.value as ChatMessageText
+    EditChatMessageDialog(
+      initialContent = messageToEdit.content,
+      onDismissRequest = { showEditChatMessageDialog = false },
+      onSaveRequest = { newContent ->
+        val messageIndex = viewModel.getMessageIndex(selectedModel, messageToEdit)
+        if (messageIndex != -1) {
+          viewModel.updateMessageContent(selectedModel, messageIndex, newContent)
+        }
+        showEditChatMessageDialog = false
+      }
+    )
   }
 }
 
