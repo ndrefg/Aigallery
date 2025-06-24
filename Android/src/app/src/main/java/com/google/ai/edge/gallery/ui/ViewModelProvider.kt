@@ -46,7 +46,10 @@ object ViewModelProvider {
     initializer { LlmChatViewModel() }
 
     // Initializer for LlmSingleTurnViewModel..
-    initializer { LlmSingleTurnViewModel() }
+    initializer {
+      val userPromptsRepository = galleryApplication().container.userPromptsRepository
+      LlmSingleTurnViewModel(userPromptsRepository = userPromptsRepository)
+    }
 
     // Initializer for LlmAskImageViewModel.
     initializer { LlmAskImageViewModel() }

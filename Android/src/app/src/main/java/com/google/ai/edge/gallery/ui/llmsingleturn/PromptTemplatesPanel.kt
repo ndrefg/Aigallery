@@ -41,6 +41,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.rounded.Add
@@ -122,9 +123,10 @@ fun PromptTemplatesPanel(
   val inputEditorValues: SnapshotStateMap<String, Any> = remember {
     mutableStateMapOf(FULL_PROMPT_SWITCH_KEY to false)
   }
-  val fullPrompt by remember {
+  val fullPromptString by remember {
     derivedStateOf {
-      uiState.selectedPromptTemplateType.genFullPrompt(curTextInputContent, inputEditorValues)
+      // Use AnnotatedString for display if needed, but send String to model
+      viewModel.generateFullPromptString(curTextInputContent, inputEditorValues)
     }
   }
   val clipboard = LocalClipboard.current
@@ -133,6 +135,7 @@ fun PromptTemplatesPanel(
   val interactionSource = remember { MutableInteractionSource() }
   val expandedStates = remember { mutableStateMapOf<String, Boolean>() }
   val modelInitializationStatus = modelManagerUiState.modelInitializationStatus[model.name]
+  var showEditPromptDialog by remember { mutableStateOf(false) }
 
   // Update input editor values when prompt template changes.
   LaunchedEffect(selectedPromptTemplateType) {
@@ -208,8 +211,10 @@ fun PromptTemplatesPanel(
             }
         ) {
           if (inputEditorValues[FULL_PROMPT_SWITCH_KEY] as Boolean) {
+            // Displaying the string version for now. If AnnotatedString features are needed
+            // from the override, the generateFullPromptString would need to return AnnotatedString.
             Text(
-              fullPrompt,
+              text = fullPromptString,
               style = MaterialTheme.typography.bodyMedium,
               modifier =
                 Modifier.fillMaxWidth()
@@ -292,12 +297,37 @@ fun PromptTemplatesPanel(
 
           Spacer(modifier = Modifier.weight(1f))
 
+          // Edit button
+          if (uiState.isCurrentPromptEditable && curTextInputContent.isNotEmpty()) {
+            OutlinedIconButton(
+              onClick = {
+                showEditPromptDialog = true
+              },
+              colors =
+                IconButtonDefaults.iconButtonColors(
+                  containerColor = MaterialTheme.customColors.agentBubbleBgColor,
+                  disabledContainerColor =
+                    MaterialTheme.customColors.agentBubbleBgColor.copy(alpha = 0.4f),
+                  contentColor = MaterialTheme.colorScheme.primary,
+                  disabledContentColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
+                ),
+              border = BorderStroke(width = 1.dp, color = MaterialTheme.colorScheme.surface),
+              modifier = Modifier.size(ICON_BUTTON_SIZE),
+            ) {
+              Icon(
+                Icons.Outlined.Edit, // Or any other appropriate edit icon
+                contentDescription = "Edit prompt",
+                modifier = Modifier.size(20.dp),
+              )
+            }
+          }
+
           // Button to copy full prompt.
           if (curTextInputContent.isNotEmpty()) {
             OutlinedIconButton(
               onClick = {
                 scope.launch {
-                  val clipData = ClipData.newPlainText("prompt", fullPrompt)
+                  val clipData = ClipData.newPlainText("prompt", fullPromptString)
                   val clipEntry = ClipEntry(clipData = clipData)
                   clipboard.setClipEntry(clipEntry = clipEntry)
                 }
@@ -362,7 +392,7 @@ fun PromptTemplatesPanel(
               enabled = !inProgress && curTextInputContent.isNotEmpty(),
               onClick = {
                 focusManager.clearFocus()
-                onSend(fullPrompt.text)
+                onSend(fullPromptString)
               },
               colors =
                 IconButtonDefaults.iconButtonColors(
@@ -385,6 +415,18 @@ fun PromptTemplatesPanel(
         }
       }
     }
+  }
+
+  if (showEditPromptDialog) {
+    EditPromptDialog(
+        promptTemplateType = selectedPromptTemplateType,
+        userPromptOverride = uiState.currentUserPromptOverride,
+        onDismissRequest = { showEditPromptDialog = false },
+        onSaveRequest = { updatedOverride ->
+            viewModel.saveUserPromptOverride(updatedOverride)
+            showEditPromptDialog = false
+        }
+    )
   }
 
   if (showExamplePromptBottomSheet) {
