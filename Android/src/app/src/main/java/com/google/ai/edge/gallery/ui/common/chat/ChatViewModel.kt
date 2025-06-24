@@ -50,6 +50,9 @@ data class ChatUiState(
    * showing the stats below it.
    */
   val showingStatsByModel: Map<String, MutableSet<ChatMessage>> = mapOf(),
+
+  /** Indicates for each model if its LlmInferenceSession needs a reset and replay due to edits. */
+  val contextSyncNeededForModel: Map<String, Boolean> = mapOf(),
 )
 
 /** ViewModel responsible for managing the chat UI state and handling chat-related operations. */
@@ -109,7 +112,51 @@ open class ChatViewModel(val task: Task) : ViewModel() {
   fun clearAllMessages(model: Model) {
     val newMessagesByModel = _uiState.value.messagesByModel.toMutableMap()
     newMessagesByModel[model.name] = mutableListOf()
-    _uiState.update { _uiState.value.copy(messagesByModel = newMessagesByModel) }
+
+    val newContextSyncNeededForModel = _uiState.value.contextSyncNeededForModel.toMutableMap()
+    newContextSyncNeededForModel[model.name] = false
+
+    _uiState.update { it.copy(
+      messagesByModel = newMessagesByModel,
+      contextSyncNeededForModel = newContextSyncNeededForModel
+    )}
+  }
+
+  fun updateMessageContent(model: Model, messageIndex: Int, newContent: String) {
+    val newMessagesByModel = _uiState.value.messagesByModel.toMutableMap()
+    val messages = newMessagesByModel[model.name]?.toMutableList()
+
+    if (messages != null && messageIndex >= 0 && messageIndex < messages.size) {
+      val originalMessage = messages[messageIndex]
+      // Allow editing for both AGENT and USER messages
+      if (originalMessage is ChatMessageText && (originalMessage.side == ChatSide.AGENT || originalMessage.side == ChatSide.USER)) {
+        val updatedMessage = originalMessage.copy(
+          content = newContent,
+          originalContent = originalMessage.originalContent ?: originalMessage.content, // Store original content if first edit
+          isEdited = true
+        )
+        messages[messageIndex] = updatedMessage
+        newMessagesByModel[model.name] = messages
+
+        val newContextSyncNeededForModel = _uiState.value.contextSyncNeededForModel.toMutableMap()
+        newContextSyncNeededForModel[model.name] = true
+
+        _uiState.update { it.copy(
+          messagesByModel = newMessagesByModel,
+          contextSyncNeededForModel = newContextSyncNeededForModel
+        )}
+      } else {
+        Log.w(TAG, "Attempted to edit a message that is not from AGENT/USER or not ChatMessageText at index $messageIndex")
+      }
+    } else {
+      Log.e(TAG, "Failed to update message content: Invalid model, index, or messages list not found.")
+    }
+  }
+
+  fun clearContextSyncNeededFlag(model: Model) {
+    val newContextSyncNeededForModel = _uiState.value.contextSyncNeededForModel.toMutableMap()
+    newContextSyncNeededForModel[model.name] = false
+    _uiState.update { it.copy(contextSyncNeededForModel = newContextSyncNeededForModel) }
   }
 
   fun getLastMessage(model: Model): ChatMessage? {
@@ -242,13 +289,18 @@ open class ChatViewModel(val task: Task) : ViewModel() {
 
   private fun createUiState(task: Task): ChatUiState {
     val messagesByModel: MutableMap<String, MutableList<ChatMessage>> = mutableMapOf()
+    val contextSyncNeededForModel: MutableMap<String, Boolean> = mutableMapOf()
     for (model in task.models) {
       val messages: MutableList<ChatMessage> = mutableListOf()
       if (model.llmPromptTemplates.isNotEmpty()) {
         messages.add(ChatMessagePromptTemplates(templates = model.llmPromptTemplates))
       }
       messagesByModel[model.name] = messages
+      contextSyncNeededForModel[model.name] = false
     }
-    return ChatUiState(messagesByModel = messagesByModel)
+    return ChatUiState(
+      messagesByModel = messagesByModel,
+      contextSyncNeededForModel = contextSyncNeededForModel
+    )
   }
 }

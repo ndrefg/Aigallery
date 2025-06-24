@@ -94,6 +94,7 @@ enum class PromptTemplateType(
       AnnotatedString("")
     },
   val examplePrompts: List<String> = listOf(),
+  val isEditable: Boolean = false,
 ) {
   FREE_FORM(
     label = "Free form",
@@ -110,6 +111,7 @@ enum class PromptTemplateType(
         "Create a simple haiku about a cat sleeping in the sun.",
         "List 3 ways to make instant noodles taste better using common kitchen ingredients.",
       ),
+    isEditable = true
   ),
   REWRITE_TONE(
     label = "Rewrite tone",

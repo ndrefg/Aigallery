@@ -59,6 +59,57 @@ open class LlmChatViewModel(curTask: Task = TASK_LLM_CHAT) : ChatViewModel(task 
   ) {
     val accelerator = model.getStringConfigValue(key = ConfigKey.ACCELERATOR, defaultValue = "")
     viewModelScope.launch(Dispatchers.Default) {
+      // === Context Sync Logic Start ===
+      if (uiState.value.contextSyncNeededForModel[model.name] == true) {
+        Log.d(TAG, "Context sync needed for model ${model.name}. Resetting and replaying history.")
+        setInProgress(true) // Show progress during replay
+        setPreparing(true)
+
+        LlmChatModelHelper.resetSession(model)
+        val session = (model.instance as? LlmModelInstance)?.session
+        if (session == null) {
+          Log.e(TAG, "Failed to get session after reset for model ${model.name}")
+          onError()
+          setInProgress(false)
+          setPreparing(false)
+          return@launch
+        }
+
+        val historyMessages = uiState.value.messagesByModel[model.name] ?: listOf()
+        for (message in historyMessages) {
+          // Only replay messages that would form the context for the *current* new input.
+          // This means we don't replay the message that is currently being composed by the user.
+          // The 'input' parameter to this function is the new user message.
+          // We are replaying everything *before* it.
+
+          if (message is ChatMessageText) {
+            // Assuming addQueryChunk is the correct method for both user and agent text history.
+            // The LlmInferenceSession internally should handle roles if it's a true multi-turn model.
+            // If not, a more complex formatting of history (e.g., "User: ...", "Agent: ...")
+            // might be needed here before passing to a single prompt field.
+            // However, LlmInferenceSession is designed for conversational AI.
+            Log.d(TAG, "Replaying to session: [${message.side}] ${message.content.take(50)}...")
+            session.addQueryChunk(message.content)
+          } else if (message is com.google.ai.edge.gallery.ui.common.chat.ChatMessageImage && model.llmSupportImage) {
+            // This part is more complex as we need the original Bitmap.
+            // ChatMessageImage stores Bitmap, which is good.
+            // This assumes images are added in order with text.
+            // The exact interplay of text and images in LlmInferenceSession history needs to be precise.
+            Log.d(TAG, "Replaying image to session...")
+            try {
+              session.addImage(com.google.mediapipe.framework.image.BitmapImageBuilder(message.bitmap).build())
+            } catch (e: Exception) {
+              Log.e(TAG, "Error replaying image to session: ${e.message}")
+              // Decide how to handle this: skip image, error out, etc.
+            }
+          }
+          // TODO: Handle ChatMessageAudioClip replay if necessary and supported
+        }
+        clearContextSyncNeededFlag(model) // Reset the flag after sync
+        Log.d(TAG, "Context replay finished for model ${model.name}")
+      }
+      // === Context Sync Logic End ===
+
       setInProgress(true)
       setPreparing(true)
 

@@ -32,6 +32,7 @@ interface AppContainer {
   val lifecycleProvider: AppLifecycleProvider
   val dataStoreRepository: DataStoreRepository
   val downloadRepository: DownloadRepository
+  val userPromptsRepository: UserPromptsRepository
 }
 
 /**
@@ -44,4 +45,5 @@ class DefaultAppContainer(ctx: Context, dataStore: DataStore<Settings>) : AppCon
   override val lifecycleProvider = GalleryLifecycleProvider()
   override val dataStoreRepository = DefaultDataStoreRepository(dataStore)
   override val downloadRepository = DefaultDownloadRepository(ctx, lifecycleProvider)
+  override val userPromptsRepository by lazy { UserPromptsRepository(ctx) }
 }

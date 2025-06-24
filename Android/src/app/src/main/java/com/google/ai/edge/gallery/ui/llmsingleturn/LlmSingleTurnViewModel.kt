@@ -53,6 +53,10 @@ data class LlmSingleTurnUiState(
 
   /** Selected prompt template type. */
   val selectedPromptTemplateType: PromptTemplateType = PromptTemplateType.entries[0],
+  /** Indicates if the current prompt template is user-editable. */
+  val isCurrentPromptEditable: Boolean = false,
+  /** User overridden prompt data for the selected template, if any. */
+  val currentUserPromptOverride: com.google.ai.edge.gallery.data.UserPromptOverride? = null
 )
 
 private val STATS =
@@ -63,9 +67,25 @@ private val STATS =
     Stat(id = "latency", label = "Latency", unit = "sec"),
   )
 
-open class LlmSingleTurnViewModel(val task: Task = TASK_LLM_PROMPT_LAB) : ViewModel() {
-  private val _uiState = MutableStateFlow(createUiState(task = task))
+open class LlmSingleTurnViewModel(
+  val task: Task = TASK_LLM_PROMPT_LAB,
+  private val userPromptsRepository: com.google.ai.edge.gallery.data.UserPromptsRepository
+) : ViewModel() {
+  private val _uiState = MutableStateFlow(createUiState(task = task, selectedPromptTemplateType = PromptTemplateType.entries[0]))
   val uiState = _uiState.asStateFlow()
+
+  init {
+    // Initialize with the first prompt template
+    val initialPromptTemplate = PromptTemplateType.entries[0]
+    val initialOverride = userPromptsRepository.getUserPromptOverride(initialPromptTemplate.name)
+    _uiState.update {
+      it.copy(
+        selectedPromptTemplateType = initialPromptTemplate,
+        isCurrentPromptEditable = initialPromptTemplate.isEditable,
+        currentUserPromptOverride = initialOverride
+      )
+    }
+  }
 
   fun generateResponse(model: Model, input: String) {
     viewModelScope.launch(Dispatchers.Default) {
@@ -164,13 +184,58 @@ open class LlmSingleTurnViewModel(val task: Task = TASK_LLM_PROMPT_LAB) : ViewMo
     // Clear response.
     updateResponse(model = model, promptTemplateType = promptTemplateType, response = "")
 
+    val override = userPromptsRepository.getUserPromptOverride(promptTemplateType.name)
     this._uiState.update {
-      this.uiState.value.copy(selectedPromptTemplateType = promptTemplateType)
+      it.copy(
+        selectedPromptTemplateType = promptTemplateType,
+        isCurrentPromptEditable = promptTemplateType.isEditable,
+        currentUserPromptOverride = override
+      )
+    }
+  }
+
+  fun saveUserPromptOverride(override: com.google.ai.edge.gallery.data.UserPromptOverride) {
+    userPromptsRepository.saveUserPromptOverride(override)
+    // Re-apply the selected template to refresh with the new override
+    selectPromptTemplate(uiState.value.selectedPromptTemplateType)
+  }
+
+  private fun selectPromptTemplate(promptTemplateType: PromptTemplateType) {
+    // This is a helper to avoid confusion with the public selectPromptTemplate that takes a model
+    val override = userPromptsRepository.getUserPromptOverride(promptTemplateType.name)
+    this._uiState.update {
+      it.copy(
+        selectedPromptTemplateType = promptTemplateType,
+        isCurrentPromptEditable = promptTemplateType.isEditable,
+        currentUserPromptOverride = override
+      )
     }
   }
 
   fun setInProgress(inProgress: Boolean) {
     _uiState.update { _uiState.value.copy(inProgress = inProgress) }
+  }
+
+  fun generateFullPromptString(userInput: String, inputEditorValues: Map<String, Any>): String {
+    val selectedTemplate = uiState.value.selectedPromptTemplateType
+    val overrideTemplate = uiState.value.currentUserPromptOverride?.fullPromptTemplate
+
+    if (overrideTemplate != null) {
+      var result = overrideTemplate
+      // Replace ${userInput}
+      result = result.replace("\${userInput}", userInput)
+
+      // Replace other placeholders from inputEditorValues
+      // Example: ${tone}, ${language}, ${style}
+      selectedTemplate.config.inputEditors.forEach { editorConfig ->
+        inputEditorValues[editorConfig.label]?.toString()?.let { value ->
+          result = result.replace("\${${editorConfig.label.lowercase()}}", value)
+        }
+      }
+      return result
+    } else {
+      return selectedTemplate.genFullPrompt(userInput, inputEditorValues).text
+    }
   }
 
   fun setPreparing(preparing: Boolean) {
@@ -212,7 +277,7 @@ open class LlmSingleTurnViewModel(val task: Task = TASK_LLM_PROMPT_LAB) : ViewMo
     }
   }
 
-  private fun createUiState(task: Task): LlmSingleTurnUiState {
+  private fun createUiState(task: Task, selectedPromptTemplateType: PromptTemplateType): LlmSingleTurnUiState {
     val responsesByModel: MutableMap<String, Map<String, String>> = mutableMapOf()
     val benchmarkByModel: MutableMap<String, Map<String, ChatMessageBenchmarkLlmResult>> =
       mutableMapOf()
@@ -220,9 +285,13 @@ open class LlmSingleTurnViewModel(val task: Task = TASK_LLM_PROMPT_LAB) : ViewMo
       responsesByModel[model.name] = mutableMapOf()
       benchmarkByModel[model.name] = mutableMapOf()
     }
+    // currentUserPromptOverride will be populated by init or selectPromptTemplate
     return LlmSingleTurnUiState(
       responsesByModel = responsesByModel,
       benchmarkByModel = benchmarkByModel,
+      selectedPromptTemplateType = selectedPromptTemplateType,
+      isCurrentPromptEditable = selectedPromptTemplateType.isEditable,
+      currentUserPromptOverride = null // Will be updated in init
     )
   }
 }
